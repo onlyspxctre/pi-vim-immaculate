@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
-    ScrollView, TuiAltScreen, VStack, visibleWidth, stripTerminalSequences, wrapTextWithAnsi, truncateToWidth,
+    Container, ScrollView, Spacer, TuiAltScreen, VStack, visibleWidth, stripTerminalSequences, wrapTextWithAnsi, truncateToWidth,
 } from "@earendil-works/pi-tui";
 import { getLayoutBoxesAt, getScrollViewBox, getScrollbarGeometry, renderLayoutFrame } from "@earendil-works/pi-tui/dist/layout.js";
 import { KeybindingsManager } from "./node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js";
 import extension from "./index.ts";
 import { installTranscriptFrame } from "./transcript-frame.ts";
 
-function fixture({ scrollbar = "hidden", lines = ["row 0", "row 1", "row 2"] } = {}) {
+function fixture({ scrollbar = "hidden", lines = ["row 0", "row 1", "row 2"], withWidgetDock = false } = {}) {
     const terminal = { columns: 40, rows: 12, write() {} };
     const tui = new TuiAltScreen(terminal, false, undefined, { copyOnSelect: false });
     tui.requestRender = () => {};
@@ -16,7 +16,19 @@ function fixture({ scrollbar = "hidden", lines = ["row 0", "row 1", "row 2"] } =
         invalidate() {},
     };
     const transcript = new ScrollView(document, { primary: true, follow: "end", scrollbar });
-    const dock = { render: (width) => ["input", "footer"].map((line) => truncateToWidth(line, width, "")), invalidate() {} };
+    const widgets = new Container();
+    widgets.addChild(new Spacer(1));
+    const pending = new Container();
+    const status = new Container();
+    const leaf = (text) => ({ render: (width) => [truncateToWidth(text, width, "")], invalidate() {} });
+    const dock = withWidgetDock ? new VStack([
+        { component: pending, minSize: 0 },
+        { component: status, minSize: 0 },
+        { component: widgets, minSize: 0 },
+        { component: leaf("input"), minSize: 1 },
+        { component: new Container(), minSize: 0 },
+        { component: leaf("footer"), minSize: 1 },
+    ]) : { render: (width) => ["input", "footer"].map((line) => truncateToWidth(line, width, "")), invalidate() {} };
     const root = new VStack([
         { component: transcript, basis: 0, grow: 1, minSize: 1 },
         { component: dock, basis: "auto", grow: 0, minSize: 1 },
@@ -31,7 +43,7 @@ function fixture({ scrollbar = "hidden", lines = ["row 0", "row 1", "row 2"] } =
         tui.previousScreen = frame.lines;
         return frame;
     };
-    return { tui, terminal, transcript, dock, root, render };
+    return { tui, terminal, transcript, dock, root, render, widgets, pending, status };
 }
 
 function plain(frame) {
@@ -133,6 +145,68 @@ describe("fullscreen transcript frame (Pi 1.4.0 private-layout probe)", () => {
             expect(f.root.children[0]).toBe(f.transcript);
             expect(plain(f.render())).toEqual(original);
         }
+    });
+
+    test("only the frame-enabled dock suppresses the default widget spacer", () => {
+        const f = fixture({ withWidgetDock: true });
+        const original = plain(f.render());
+        expect(original[9].trim()).toBe("");
+        expect(original[10].trim()).toBe("input");
+        for (let i = 0; i < 3; i++) {
+            const handle = installTranscriptFrame(f.tui, (text) => text);
+            const lines = plain(f.render());
+            expect(lines[9].startsWith("╰")).toBe(true);
+            expect(lines[10].trim()).toBe("input");
+            // The host container itself is not mutated.
+            expect(f.widgets.children[0]).toBeInstanceOf(Spacer);
+            handle.dispose();
+            expect(f.dock.children[2]).toBe(f.widgets);
+            expect(plain(f.render())).toEqual(original);
+        }
+    });
+
+    test("widget rebuilds, widget-owned blank lines, and mouse coordinates are preserved", () => {
+        const f = fixture({ withWidgetDock: true });
+        const handle = installTranscriptFrame(f.tui, (text) => text);
+        f.render();
+        let clickedRow;
+        const widget = {
+            render: () => ["", "widget"],
+            invalidate() {},
+            handleMouse(event) { clickedRow = event.y; return { handled: true }; },
+        };
+        // Simulate Pi's renderWidgets() rebuilding the original container.
+        f.widgets.clear();
+        f.widgets.addChild(new Spacer(1));
+        f.widgets.addChild(widget);
+        let lines = plain(f.render());
+        expect(lines[7].startsWith("╰")).toBe(true);
+        expect(lines[8].trim()).toBe(""); // blank row owned by widget, not the host
+        expect(lines[9].trim()).toBe("widget");
+        expect(lines[10].trim()).toBe("input");
+        const compact = f.dock.children[2];
+        compact.handleMouse({ x: 0, y: 1, width: 40, height: 2, screenX: 0, screenY: 9, type: "down" });
+        expect(clickedRow).toBe(1);
+        f.widgets.clear();
+        f.widgets.addChild(new Spacer(1));
+        lines = plain(f.render());
+        expect(lines[9].startsWith("╰")).toBe(true);
+        handle.dispose();
+        expect(f.dock.children[2]).toBe(f.widgets);
+    });
+
+    test("pending messages and status content are not removed with the spacer", () => {
+        const f = fixture({ withWidgetDock: true });
+        const handle = installTranscriptFrame(f.tui, (text) => text);
+        const leaf = (text) => ({ render: () => [text], invalidate() {} });
+        f.pending.addChild(leaf("queued message"));
+        f.status.addChild(leaf("working"));
+        const lines = plain(f.render());
+        expect(lines[7].startsWith("╰")).toBe(true);
+        expect(lines[8].trim()).toBe("queued message");
+        expect(lines[9].trim()).toBe("working");
+        expect(lines[10].trim()).toBe("input");
+        handle.dispose();
     });
 
     test("unknown layout is left untouched", () => {

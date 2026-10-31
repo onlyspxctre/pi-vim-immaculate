@@ -10,7 +10,11 @@ Run `/reload` in Pi. `config.transcriptFrame` in `index.ts` enables the prototyp
 Set it to `false` and reload to remove it.
 
 - The transcript keeps its original scroll view, history, follow-output behavior,
-  and scrollbar. The input dock is not wrapped.
+  and scrollbar. The input dock is not wrapped in a border.
+- While enabled, the dock's default leading widget spacer is omitted, closing
+  the gap above the editor. Actual widgets (including their own blank lines),
+  status indicators, and pending messages are retained. Disabling the frame
+  restores the spacer; widget-container rebuilds do not bring the gap back.
 - Tab switches normal/reader modes. The transcript frame uses the current theme's
   `accent` color in reader mode and `dim` otherwise. The footer label remains for
   now so both indications can be compared.
@@ -25,7 +29,9 @@ Set it to `false` and reload to remove it.
 first entry of the root stack's private `entries` array, keeping its public
 `children` array in sync. Structural checks reject an unexpected layout without
 modifying it. The wrapper itself is made from public `VStack` and `HStack`
-components, with small border-rendering components.
+components, with small border-rendering components. A view of the above-editor
+widget container also replaces its dock entry, skipping only the host's leading
+`Spacer` without modifying the original widget container.
 
 Unlike painting characters over the final terminal screen, this lets Pi's layout
 engine account for the border's inset. Scrollbars and mouse selection retain
@@ -46,6 +52,8 @@ bun test
 Headless tests cover frame geometry, scrolling/follow-end, scrollbar placement,
 mouse selection without border text, narrow/wide-character rendering, resizing,
 mode colors, repeated install/dispose, and restoration of the original layout.
+They also cover conditional spacer removal, widget rebuilds and mouse coordinates,
+preservation of widget-owned blank lines, and pending/status content.
 The prototype was also loaded with the installed Pi/Jiti extension loader to
 check imports and host/extension class identity.
 

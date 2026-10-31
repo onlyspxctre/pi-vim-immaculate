@@ -1,7 +1,9 @@
 import {
     type Component,
+    Container,
     HStack,
     ScrollView,
+    Spacer,
     type StackEntry,
     TuiAltScreen,
     VStack,
@@ -10,6 +12,40 @@ import {
 export interface TranscriptFrame {
     readonly viewportHeight: number;
     dispose(): void;
+}
+
+// Pi 1.4.0's dock is pending messages, status, above-editor widgets, editor,
+// below-editor widgets, footer. Wrap just the widget container's rendered view;
+// Pi can continue clearing/repopulating the original container as usual.
+function compactAboveEditorWidgets(root: VStack): () => void {
+    const dock = root.children[1];
+    if (!(dock instanceof VStack)) return () => {};
+    const entry = (dock as unknown as { entries?: StackEntry[] }).entries?.[2];
+    const widgets = entry?.component;
+    if (!entry || !(widgets instanceof Container) || dock.children[2] !== widgets) return () => {};
+
+    const compact = new class extends Container {
+        render(width: number): string[] {
+            // Skip only the host's leading Spacer, never blank lines belonging
+            // to a widget. Refresh each render to survive renderWidgets rebuilds.
+            this.children = widgets.children[0] instanceof Spacer
+                ? widgets.children.slice(1)
+                : widgets.children.slice();
+            return super.render(width);
+        }
+
+        invalidate(): void {
+            widgets.invalidate();
+        }
+    }();
+    entry.component = compact;
+    dock.children[2] = compact;
+
+    return () => {
+        if (entry.component === compact) entry.component = widgets;
+        const index = dock.children.indexOf(compact);
+        if (index !== -1) dock.children[index] = widgets;
+    };
 }
 
 // Experimental Pi 1.4.0 adapter. There is no public layout-root getter or
@@ -60,6 +96,7 @@ export function installTranscriptFrame(
     // Preserve the original root, ScrollView, dock, and allocation options.
     // In particular, do not recreate the scroll view: that would lose follow-end,
     // selection/search associations, and the host's scrollbar-settings reference.
+    const restoreWidgetSpacing = compactAboveEditorWidgets(root);
     entry.component = frame;
     root.children[0] = frame;
     tui.resetTextSelection(); // The narrower document may wrap at different rows.
@@ -74,6 +111,7 @@ export function installTranscriptFrame(
         dispose() {
             if (disposed) return;
             disposed = true;
+            restoreWidgetSpacing();
             // Do not overwrite a layout another extension has since replaced.
             if (entry.component === frame) entry.component = transcript;
             const index = root.children.indexOf(frame);
