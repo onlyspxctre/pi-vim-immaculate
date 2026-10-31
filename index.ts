@@ -1,5 +1,6 @@
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { matchesKey, TuiAltScreen } from "@earendil-works/pi-tui";
+import { installTranscriptFrame, type TranscriptFrame } from "./transcript-frame.js";
 
 // Configure Vim reading mode here. These are extension bindings, not global
 // Pi keybindings: movement depends on whether the editor is in normal or reader mode.
@@ -19,13 +20,18 @@ const config = {
     topSequence: "gg",
     sequenceTimeoutMs: 750,
     linesPerStep: 1,
+    transcriptFrame: true, // Experimental fullscreen-only rounded frame.
 } as const;
 
 export default function(pi: ExtensionAPI) {
+    let transcriptFrame: TranscriptFrame | undefined;
+
     pi.on("session_start", (_event, ctx) => {
         if (ctx.mode !== "tui") return;
 
         ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+            transcriptFrame?.dispose();
+            transcriptFrame = undefined;
             // Regular-mode scrollback belongs to the terminal, not Pi.
             if (!(tui instanceof TuiAltScreen)) {
                 ctx.ui.setStatus(extensionName, "Vim reading requires fullscreen mode");
@@ -35,6 +41,13 @@ export default function(pi: ExtensionAPI) {
             let mode = config.initialMode;
             let pending = "";
             let pendingAt = 0;
+            if (config.transcriptFrame) {
+                transcriptFrame = installTranscriptFrame(tui, (text) =>
+                    ctx.ui.theme.fg(mode === "reader" ? "accent" : "dim", text));
+                if (!transcriptFrame) {
+                    ctx.ui.notify("Transcript frame unavailable: Pi's fullscreen layout did not match the expected structure.", "warning");
+                }
+            }
             const showMode = () => {
                 ctx.ui.setStatus(extensionName, `${mode.toUpperCase()} ${pending}`.trim());
                 tui.requestRender();
@@ -144,6 +157,9 @@ export default function(pi: ExtensionAPI) {
                 }
 
                 private halfPageLines(): number {
+                    if (transcriptFrame && transcriptFrame.viewportHeight > 0) {
+                        return Math.max(1, Math.floor(transcriptFrame.viewportHeight / 2));
+                    }
                     // Approximate the transcript height by excluding the input editor.
                     const editorHeight = this.render(tui.terminal.columns).length;
                     return Math.max(1, Math.floor((tui.terminal.rows - editorHeight) / 2));
@@ -153,6 +169,8 @@ export default function(pi: ExtensionAPI) {
     });
 
     pi.on("session_shutdown", (_event, ctx) => {
+        transcriptFrame?.dispose();
+        transcriptFrame = undefined;
         if (ctx.mode === "tui") ctx.ui.setStatus(extensionName, undefined);
     });
 }
