@@ -1,6 +1,7 @@
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { matchesKey, TuiAltScreen } from "@earendil-works/pi-tui";
 import { installTranscriptFrame, type TranscriptFrame } from "./transcript-frame.js";
+import { RoundedEditor } from "./rounded-editor.js";
 
 // Configure Vim reading mode here. These are extension bindings, not global
 // Pi keybindings: movement depends on whether the editor is in normal or reader mode.
@@ -21,6 +22,7 @@ const config = {
     sequenceTimeoutMs: 750,
     linesPerStep: 1,
     transcriptFrame: true, // Experimental fullscreen-only rounded frame.
+    inputFrame: true,
 } as const;
 
 export default function(pi: ExtensionAPI) {
@@ -54,7 +56,10 @@ export default function(pi: ExtensionAPI) {
             };
             showMode();
 
-            return new class extends CustomEditor {
+            return new class extends RoundedEditor {
+                roundedFrame = config.inputFrame;
+                frameColor = (text: string) => ctx.ui.theme.fg(mode === "reader" ? "dim" : "accent", text);
+
                 handleInput(data: string): void {
                     // Shift+Tab always retains Pi's thinking-level shortcut.
                     if (matchesKey(data, "shift+tab")) {
