@@ -13,6 +13,8 @@ const config = {
     toggleReader: "tab",
     cursorLeft: "h",
     cursorRight: "l",
+    wordForward: "w",
+    wordBackward: "b",
     lineUp: "k",
     lineDown: "j",
     halfPageUp: "ctrl+u",
@@ -108,6 +110,10 @@ export default function(pi: ExtensionAPI) {
                                 this.movePromptCursor(0, -1);
                             } else if (matchesKey(data, config.cursorRight)) {
                                 this.movePromptCursor(0, 1);
+                            } else if (matchesKey(data, config.wordForward)) {
+                                this.movePromptWord(1);
+                            } else if (matchesKey(data, config.wordBackward)) {
+                                this.movePromptWord(-1);
                             } else if (matchesKey(data, config.lineUp)) {
                                 this.movePromptCursor(-1, 0);
                             } else if (matchesKey(data, config.lineDown)) {
@@ -159,6 +165,47 @@ export default function(pi: ExtensionAPI) {
                     };
                     editor.moveCursor(deltaLine, deltaCol);
                     tui.requestRender();
+                }
+
+                private movePromptWord(direction: -1 | 1): void {
+                    const lines = this.getLines();
+                    let cursor = this.getCursor();
+                    const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+                    const text = () => lines[cursor.line];
+                    const char = (col = cursor.col) => graphemes.segment(text()).containing(col)?.segment ?? "";
+                    const kind = (text: string) => !text || /^\s+$/u.test(text) ? "space"
+                        : /^[\p{L}\p{N}_]/u.test(text) ? "word" : "punctuation";
+                    const step = () => {
+                        // Stop on the final grapheme, not the insertion position.
+                        if (direction > 0 && cursor.line === lines.length - 1 && cursor.col + char().length >= text().length) return false;
+                        this.movePromptCursor(0, direction);
+                        const next = this.getCursor();
+                        if (next.line === cursor.line && next.col === cursor.col) return false;
+                        cursor = next;
+                        return true;
+                    };
+
+                    if (direction > 0) {
+                        const line = cursor.line;
+                        const run = kind(char());
+                        if (cursor.col < text().length || !text().length) {
+                            do {
+                                if (!step()) return;
+                            } while (cursor.line === line && char() && kind(char()) === run);
+                        }
+                        while (text().length && kind(char()) === "space") {
+                            if (!step()) return;
+                        }
+                    } else {
+                        if (!step()) return;
+                        while (text().length && kind(char()) === "space") {
+                            if (!step()) return;
+                        }
+                        const run = kind(char());
+                        while (cursor.col > 0 && kind(char(cursor.col - 1)) === run) {
+                            if (!step()) return;
+                        }
+                    }
                 }
 
                 private halfPageLines(): number {
