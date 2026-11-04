@@ -6,6 +6,9 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
+  "pi": {
+      "extensions": ["./index.ts"]
+  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@earendil-works/pi-tui": "1.4.0",
